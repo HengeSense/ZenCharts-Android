@@ -11,6 +11,12 @@ import java.util.ArrayList;
 import javax.microedition.khronos.egl.EGLConfig;
 import javax.microedition.khronos.opengles.GL10;
 
+import org.joda.time.DateMidnight;
+import org.joda.time.DateTime;
+import org.joda.time.Duration;
+import org.joda.time.DurationFieldType;
+import org.joda.time.format.DateTimeFormat;
+
 import zencharts.data.DateSeries;
 import zencharts.engine.GLText;
 import android.content.Context;
@@ -21,36 +27,38 @@ import android.graphics.Rect;
 import android.graphics.RectF;
 import android.opengl.GLSurfaceView;
 import android.opengl.GLSurfaceView.Renderer;
+import android.os.AsyncTask;
 import android.util.AttributeSet;
 import android.util.Log;
-import android.view.GestureDetector;
 import android.view.MotionEvent;
 import android.view.ScaleGestureDetector;
 import android.view.SurfaceHolder;
 
 public class DateChart extends GLSurfaceView implements Renderer {
-
 	private String fontName;
 	private int fontSize;
 	private int fontPadX;
 	private int fontPadY;
 
-	public static final int IDLE_FPS = 5;
-	public static final int ACTIVE_FPS = 40;
-	public static int FPS = IDLE_FPS;
+	private static final int IDLE_FPS = 5;
+	private static final int ACTIVE_FPS = 40;
+	private static int FPS = IDLE_FPS;
 	// public static final int FPS_MS = ;
-	public static boolean gridLines = true;
-	public static boolean drawShade = true;
-	public static boolean drawLines = true;
-	public static boolean drawSymbols = true;
-	public static int gridSize = 10;
-	public static float shadeAlpha = 0.30f;
-	public static float lineAlpha = 1f;
+
+	private static final int HORIZONTAL_GRID_SECTIONS = 5;
+	private float mHorizontalGridSpacing;
+
+	private DateTime mPeriodStartTime;
+	private Duration mPeriod;
+	private GridPeriod mGridPeriodType;
+	private GridPeriod mPendingGridPeriodType;
+
+	private boolean gridLines = true;
 
 	private Bitmap lastScreenShot;
 	private boolean screenShot = false;
-	
-	public int maxValue;
+
+	public float maxValue;
 	public int maxDataPoints;
 
 	public boolean xScaleLock;
@@ -60,30 +68,30 @@ public class DateChart extends GLSurfaceView implements Renderer {
 	private ArrayList<DateSeries> seriesCollection;
 
 	private ScaleGestureDetector mScaleDetector;
-	private GestureDetector mFlingDetector;
 
-	private float mMaxScaleFactor;
 	private float mScaleFactor;
 	private float mScaleX = 0;
 
-	private float mScaleFocalX, mScaleFocalY;
-
 	private float mPosX;
-	//private float mPosY;
+	// private float mPosY;
 
 	public static Rect mWindow;
 
 	private float mLastTouchX;
-	//private float mLastTouchY;
+	// private float mLastTouchY;
 
 	private long mStartTime;
 	private long mCurrentTime;
 	private long mTimeDelta;
 
-	private RectF mBounds;
+	private RectF mScaledScreenBounds;
 
 	private GLText glText;
-	private int maxSeriesSize = 0;
+
+	private float mPeriodSeconds;
+
+	private float mPeriodSpacing;
+	private float mPeriodLines;
 
 	private static final int INVALID_POINTER_ID = -1;
 
@@ -101,15 +109,16 @@ public class DateChart extends GLSurfaceView implements Renderer {
 
 		this.setEGLConfigChooser(8, 8, 8, 8, 0, 0);
 		this.getHolder().setFormat(PixelFormat.TRANSLUCENT);
-		//this.setDebugFlags(GLSurfaceView.DEBUG_CHECK_GL_ERROR | GLSurfaceView.DEBUG_LOG_GL_CALLS);
-		
-		 // set our renderer to be the main renderer with the current activity
+		// this.setDebugFlags(GLSurfaceView.DEBUG_CHECK_GL_ERROR |
+		// GLSurfaceView.DEBUG_LOG_GL_CALLS);
+
+		// set our renderer to be the main renderer with the current activity
 		// context
 		this.setRenderer(this);
 
 		// Create our ScaleGestureDetector
 		mScaleDetector = new ScaleGestureDetector(context, new ScaleListener());
-		
+
 	}
 
 	@Override
@@ -117,7 +126,7 @@ public class DateChart extends GLSurfaceView implements Renderer {
 	{
 		super.onPause();
 	}
-	
+
 	@Override
 	public void onResume()
 	{
@@ -129,22 +138,52 @@ public class DateChart extends GLSurfaceView implements Renderer {
 			}
 		}
 	}
-	
-	public void AddSeries(DateSeries inSeries) {
+
+	public void addSeries(DateSeries inSeries) {
 		if (seriesCollection == null)
 			seriesCollection = new ArrayList<DateSeries>();
-		
+
+		maxDataPoints = 0;
+		maxValue = 0;
+
 		inSeries.symbol = null;
 		seriesCollection.add(inSeries);
 
-		if (inSeries.size() > maxSeriesSize)
-			maxSeriesSize = inSeries.size();
-
-		calculateGridlines();
-		
-
+		final int seriesCount = seriesCollection.size();
+		for (int i = 0; i < seriesCount; i++) {
+			DateSeries series = seriesCollection.get(i);
+			maxDataPoints = Math.max(maxDataPoints, series.size() - 1);
+			for (int j = 0; j < series.size(); j++) {
+				maxValue = Math.max(maxValue, series.get(j).value);
+			}
+		}
+		calculateGridlines(true);
 	}
-	
+
+	/**
+	 * @return the periodStartTime
+	 */
+	public DateTime getPeriodStartTime() {
+		return mPeriodStartTime;
+	}
+
+	/**
+	 * @param periodStartTime
+	 *            the periodStartTime to set
+	 */
+	public void setPeriodStartTime(DateTime periodStartTime) {
+		mPeriodStartTime = periodStartTime;
+	}
+
+	public Duration getPeriod() {
+		return mPeriod;
+	}
+
+	public void setPeriod(Duration period) {
+		mPeriod = period;
+		mPeriodSeconds = period.toStandardSeconds().getSeconds();
+	}
+
 	public void clearChart()
 	{
 		if (seriesCollection != null)
@@ -154,18 +193,14 @@ public class DateChart extends GLSurfaceView implements Renderer {
 		}
 	}
 
-	public void LoadFont(String name, int size, int padx, int pady) {
+	public void loadFont(String name, int size, int padx, int pady) {
 		fontName = name;
 		fontSize = size;
 		fontPadX = padx;
 		fontPadY = pady;
 	}
 
-	public void SetMaxYValue(int maxY) {
-		maxValue = maxY;
-	}
-
-	public void SetSeriesVisibility(int series, boolean visible) {
+	public void setSeriesVisibility(int series, boolean visible) {
 		seriesCollection.get(series).visible = visible;
 	}
 
@@ -187,49 +222,50 @@ public class DateChart extends GLSurfaceView implements Renderer {
 		}
 		mStartTime = System.currentTimeMillis();
 
-		if((seriesCollection != null) && (seriesCollection.size()>0))
-		{
-			
+		if ((seriesCollection != null) && (seriesCollection.size() > 0)) {
 			updateChart(gl);
 			renderChart(gl);
 		}
-		
-		if(screenShot){                     
-            int screenshotSize = mWindow.width() * mWindow.height();
-            ByteBuffer bb = ByteBuffer.allocateDirect(screenshotSize * 4);
-            bb.order(ByteOrder.nativeOrder());
-            gl.glReadPixels(0, 0, mWindow.width(), mWindow.height(), GL10.GL_RGBA, GL10.GL_UNSIGNED_BYTE, bb);
-            int pixelsBuffer[] = new int[screenshotSize];
-            bb.asIntBuffer().get(pixelsBuffer);
-            bb = null;
-            Bitmap bitmap = Bitmap.createBitmap(mWindow.width(), mWindow.height(), Bitmap.Config.ARGB_8888);
-            bitmap.setPixels(pixelsBuffer, screenshotSize-mWindow.width(), -mWindow.width(), 0, 0, mWindow.width(), mWindow.height());
-            pixelsBuffer = null;
 
-            short sBuffer[] = new short[screenshotSize];
-            ShortBuffer sb = ShortBuffer.wrap(sBuffer);
-            bitmap.copyPixelsToBuffer(sb);
+		if (screenShot) {
+			int screenshotSize = mWindow.width() * mWindow.height();
+			ByteBuffer bb = ByteBuffer.allocateDirect(screenshotSize * 4);
+			bb.order(ByteOrder.nativeOrder());
+			gl.glReadPixels(0, 0, mWindow.width(), mWindow.height(), GL10.GL_RGBA, GL10.GL_UNSIGNED_BYTE, bb);
+			int pixelsBuffer[] = new int[screenshotSize];
+			bb.asIntBuffer().get(pixelsBuffer);
+			bb = null;
+			Bitmap bitmap = Bitmap.createBitmap(mWindow.width(), mWindow.height(), Bitmap.Config.RGB_565);
+			bitmap.setPixels(pixelsBuffer, screenshotSize - mWindow.width(), -mWindow.width(), 0, 0, mWindow.width(), mWindow.height());
+			pixelsBuffer = null;
 
-            //Making created bitmap (from OpenGL points) compatible with Android bitmap
-            for (int i = 0; i < screenshotSize; ++i) {                  
-                short v = sBuffer[i];
-                sBuffer[i] = (short) (((v&0x1f) << 11) | (v&0x7e0) | ((v&0xf800) >> 11));
-            }
-            sb.rewind();
-            bitmap.copyPixelsFromBuffer(sb);
-            lastScreenShot = bitmap.copy(Config.ARGB_8888, true);
+			short sBuffer[] = new short[screenshotSize];
+			ShortBuffer sb = ShortBuffer.wrap(sBuffer);
+			bitmap.copyPixelsToBuffer(sb);
 
-            screenShot = false;
-        }
+			// Making created bitmap (from OpenGL points) compatible with
+			// Android bitmap
+			for (int i = 0; i < screenshotSize; ++i) {
+				short v = sBuffer[i];
+				sBuffer[i] = (short) (((v & 0x1f) << 11) | (v & 0x7e0) | ((v & 0xf800) >> 11));
+			}
+			sb.rewind();
+			bitmap.copyPixelsFromBuffer(sb);
+			lastScreenShot = bitmap.copy(Config.RGB_565, true);
+
+			screenShot = false;
+		}
 	}
 
 	private void updateChart(GL10 gl) {
 
+		// final float scaledDataWidth = (1 / mScaleFactor) * (1 / mScaleX) *
+		// ((float) mPeriodSeconds);
 		final float scaledWidth = mScaleFactor * ((float) mWindow.width() * mScaleX);
 		final float scaledHeight = mScaleFactor * (float) mWindow.height();
 
-		final float currentWidth = ((maxDataPoints * 10) / mScaleFactor);
-		if ( (maxDataPoints <= 2) || currentWidth < (mWindow.width() * .9f)) {
+		final float currentWidth = (mPeriodSeconds / mScaleFactor);
+		if ((maxDataPoints <= 2) || currentWidth < (mWindow.width() * .9f)) {
 			xScaleLock = true;
 			mScaleX = currentWidth / (mWindow.width() * .9f);
 
@@ -240,34 +276,32 @@ public class DateChart extends GLSurfaceView implements Renderer {
 		final float top = (.5f * mWindow.height());
 		final float bottom = (.5f * -mWindow.height());
 
-		mScaleFactor = mMaxScaleFactor;
+		// mPosX = Math.min(mPosX, -(scaledWidth * 0.9f));
 
-		mPosX = Math.min(mPosX, -(scaledWidth * 0.9f));
+		final float minX = (-scaledWidth * 0.9f) / 2.0f;
+		final float maxX = -(mPeriodSeconds) + ((scaledWidth / 2.0f) * 0.9f);
+		mPosX = Math.max(Math.min(minX, mPosX), maxX);
 
-		mPosX = Math.max(mPosX, -(maxDataPoints * (gridSize * 2))
-				+ (scaledWidth * 0.9f));
+		final float leftTrans = mPosX;// / 2.0f;
 
-		// mPosX = Math.max(mPosX, scaledGraphWidth);
-		// Log.v("sdafads", "" + mPosX + "| " + graphWidth);
-		// mPosX = Math.min(mPosX, xMin);
+		final float topTrans = (0 - ((mWindow.height() * mScaleFactor) / 2.0f)) * 0.9f;
 
-		final float leftTrans = mPosX / 2.0f;
-
-		final float topTrans = (0 - ((mWindow.height() * mScaleFactor) / 2.0f)) * 0.9f; 
-
-		mBounds = new RectF(0, 0, (mWindow.width() * mScaleX) * mScaleFactor,
+		mScaledScreenBounds = new RectF(0, 0, (mWindow.width() * mScaleX) * mScaleFactor,
 				mWindow.height() * mScaleFactor);
-		mBounds.offset(-(leftTrans) - (scaledWidth / 2.0f), -topTrans
+		mScaledScreenBounds.offset(-(leftTrans) - (scaledWidth / 2.0f), -topTrans
 				- (scaledHeight / 2.0f));
-		mBounds.inset(-15, -15);
+		mScaledScreenBounds.inset(-15, -15);
 		// Log.v("sdafads", "" + mBounds);
+
+		if (verticalGridlines == null) {
+			calculateGridlines(true);
+		}
+		// calculateVerticalGridlines();
 
 		if (glText.collisionRects == null)
 			glText.collisionRects = new ArrayList<RectF>();
 		glText.collisionRects.clear();
 
-		
-		
 		// Reset the Modelview Matrix
 		gl.glMatrixMode(GL10.GL_PROJECTION);
 		gl.glLoadIdentity();
@@ -290,108 +324,157 @@ public class DateChart extends GLSurfaceView implements Renderer {
 
 		try
 		{
-		if (gridLines)
-			drawGridlines(gl);
-		}catch(Exception ex){}
-		
+			if (gridLines)
+				drawGridlines(gl);
+		} catch (Exception ex) {
+		}
+
 		boolean drawnLabels = false;
-		
+
+		// gl.glTranslatef(5000, 0, 0);
 		if (seriesCollection != null) {
 			int iLoop = seriesCollection.size();
 			for (int i = 0; i < iLoop; i++) {
 				if (seriesCollection.get(i).visible)
 				{
-					if(drawnLabels)
+					float x = seriesCollection.get(i).getMinDate() - (mPeriodStartTime.getMillis() / 1000);
+					gl.glTranslatef(x, 0, 0);
+					if (drawnLabels)
 						seriesCollection.get(i).dateLabels = false;
 					else
 						seriesCollection.get(i).dateLabels = true;
-					
-					seriesCollection.get(i).draw(gl, glText, mScaleFactor,
-							mScaleX, mBounds, gridLines);
-					
+
+					seriesCollection.get(i).draw(gl, mPeriodStartTime.getMillis() / 1000, mScaleFactor,
+							mScaleX, mScaledScreenBounds);
+
 					drawnLabels = true;
+					gl.glTranslatef(-x, 0, 0);
 				}
 			}
 		}
+
+		// gl.glTranslatef(-5000, 0, 0);
+
+		drawText(gl, glText, mScaleFactor, mScaleX, mScaledScreenBounds);
 	}
 
 	private float[] verticalGridlines;
 	private float[] horizontalGridlines;
-	public FloatBuffer horizontalGridlineBuffer;
-	public ByteBuffer horizontalGridlineByteBuffer;
-	public FloatBuffer verticalGridlineBuffer;
-	public ByteBuffer verticalGridlineByteBuffer;
+	private FloatBuffer horizontalGridlineBuffer;
+	private FloatBuffer verticalGridlineBuffer;
 
-	public void calculateGridlines() {
-		maxDataPoints = 0;
-		maxValue = 0;
+	private float[] verticalGridlineSwap;
+	private float[] horizontalGridlineSwap;
+	private FloatBuffer horizontalGridlineSwapBuffer;
+	private ByteBuffer horizontalGridlineSwapByteBuffer;
+	private FloatBuffer verticalGridlineSwapBuffer;
+	private ByteBuffer verticalGridlineSwapByteBuffer;
 
-		final int seriesCount = seriesCollection.size();
-		for (int i = 0; i < seriesCount; i++) {
-			DateSeries series = seriesCollection.get(i);
-			maxDataPoints = Math.max(maxDataPoints, series.size() - 1);
-			for (int j = 0; j < series.size(); j++) {
-				maxValue = Math.max(maxValue, series.get(j).value);
+	private RectF mPrevGridBounds = new RectF();
+	private boolean calculating = false;
+
+	public void calculateGridlines(boolean force) {
+		new AsyncTask<Boolean, Void, Void>() {
+			@Override
+			protected Void doInBackground(Boolean... params) {
+				calculating = true;
+				calculateHorizontalGridlines();
+				calculateVerticalGridlines(params[0]);
+
+				return null;
 			}
-		}
 
-		final int maxHorizontalLines = (int) (Math.ceil((maxValue + 20)
-				/ gridSize));
+			protected void onPostExecute(Void result) {
+				queueEvent(new Runnable() {
+					public synchronized void run() {
+						verticalGridlines = verticalGridlineSwap;
+						horizontalGridlines = horizontalGridlineSwap;
+						verticalGridlineBuffer = verticalGridlineSwapBuffer;
+						horizontalGridlineBuffer = horizontalGridlineSwapBuffer;
+						mGridPeriodType = mPendingGridPeriodType;
+						calculating = false;
+					}
+				});
+			};
+		}.execute(force);
+	}
 
-		verticalGridlines = new float[(maxDataPoints + 1) * 6];
-		int vPos = 0;
-		for (int i = 0; i < maxDataPoints + 1; i++) {
+	private void calculateHorizontalGridlines() {
 
-			verticalGridlines[vPos] = i * gridSize;
-			vPos++;
-			verticalGridlines[vPos] = 0;
-			vPos++;
-			verticalGridlines[vPos] = 0;// ;
-			vPos++;
+		final float horizontalGridSpacingSize = HORIZONTAL_GRID_SECTIONS / maxValue;
 
-			verticalGridlines[vPos] = i * gridSize;
-			vPos++;
-			verticalGridlines[vPos] = (maxHorizontalLines - 1) * gridSize;
-			vPos++;
-			verticalGridlines[vPos] = 0;// ;
-			vPos++;
-
-			// Gridlines
-			verticalGridlineByteBuffer = ByteBuffer
-					.allocateDirect((verticalGridlines.length + 1) * 4);
-			verticalGridlineByteBuffer.order(ByteOrder.nativeOrder());
-			verticalGridlineBuffer = verticalGridlineByteBuffer.asFloatBuffer();
-			verticalGridlineBuffer.put(verticalGridlines);
-			verticalGridlineBuffer.position(0);
-		}
-
-		horizontalGridlines = new float[(maxHorizontalLines) * 6];
+		horizontalGridlineSwap = new float[(HORIZONTAL_GRID_SECTIONS + 1) * 6];
 		int hPos = 0;
-		for (int i = 0; i < maxHorizontalLines; i++) {
+		for (int i = 0; i < HORIZONTAL_GRID_SECTIONS + 1; i++) {
 
-			horizontalGridlines[hPos] = 0;
+			horizontalGridlineSwap[hPos] = 0;
 			hPos++;
-			horizontalGridlines[hPos] = i * gridSize;
+			horizontalGridlineSwap[hPos] = i * horizontalGridSpacingSize;
 			hPos++;
-			horizontalGridlines[hPos] = 0;// ;
-			hPos++;
-
-			horizontalGridlines[hPos] = maxDataPoints * gridSize;
-			hPos++;
-			horizontalGridlines[hPos] = i * gridSize;
-			hPos++;
-			horizontalGridlines[hPos] = 0;// ;
+			horizontalGridlineSwap[hPos] = 0;// ;
 			hPos++;
 
-			// Gridlines
-			horizontalGridlineByteBuffer = ByteBuffer
-					.allocateDirect((horizontalGridlines.length) * 4);
-			horizontalGridlineByteBuffer.order(ByteOrder.nativeOrder());
-			horizontalGridlineBuffer = horizontalGridlineByteBuffer
-					.asFloatBuffer();
-			horizontalGridlineBuffer.put(horizontalGridlines);
-			horizontalGridlineBuffer.position(0);
+			horizontalGridlineSwap[hPos] = (float) (mPeriodSpacing * (Math.floor(mPeriodLines)));
+			hPos++;
+			horizontalGridlineSwap[hPos] = i * horizontalGridSpacingSize;
+			hPos++;
+			horizontalGridlineSwap[hPos] = 0;// ;
+			hPos++;
 		}
+
+		// Gridlines
+		horizontalGridlineSwapByteBuffer = ByteBuffer
+				.allocateDirect((horizontalGridlineSwap.length) * 4);
+		horizontalGridlineSwapByteBuffer.order(ByteOrder.nativeOrder());
+		horizontalGridlineSwapBuffer = horizontalGridlineSwapByteBuffer
+				.asFloatBuffer();
+		horizontalGridlineSwapBuffer.put(horizontalGridlineSwap);
+		horizontalGridlineSwapBuffer.position(0);
+	}
+
+	private synchronized void calculateVerticalGridlines(boolean force) {
+		if (mScaledScreenBounds == null) {
+			return;
+		} else if (!force && mPrevGridBounds.contains(mScaledScreenBounds)) {
+			return;
+		}
+
+		RectF bounds = new RectF(mScaledScreenBounds);
+		bounds.inset(-mScaledScreenBounds.width() * 0.3f, 0);
+
+		final float horizontalGridSpacingSize = HORIZONTAL_GRID_SECTIONS / maxValue;
+
+		int vPos = 0;
+		int firstLine = (int) Math.max(0, bounds.left / mPeriodSpacing);
+		int lastLine = (int) Math.min(Math.floor(mPeriodLines), Math.ceil(bounds.right / mPeriodSpacing));
+		verticalGridlineSwap = new float[(lastLine - firstLine + 1) * 6];
+		for (int i = firstLine; i <= lastLine; i++) {
+			// Log.v("bla", "" + i * mPeriodSpacing);
+			verticalGridlineSwap[vPos] = i * mPeriodSpacing;
+			vPos++;
+			verticalGridlineSwap[vPos] = 0;
+			vPos++;
+			verticalGridlineSwap[vPos] = 0;// ;
+			vPos++;
+
+			verticalGridlineSwap[vPos] = i * mPeriodSpacing;
+			vPos++;
+			verticalGridlineSwap[vPos] = HORIZONTAL_GRID_SECTIONS * horizontalGridSpacingSize;
+			vPos++;
+			verticalGridlineSwap[vPos] = 0;// ;
+			vPos++;
+		}
+
+		// Gridlines
+		verticalGridlineSwapByteBuffer = ByteBuffer
+				.allocateDirect((verticalGridlineSwap.length + 1) * 4);
+		verticalGridlineSwapByteBuffer.order(ByteOrder.nativeOrder());
+		verticalGridlineSwapBuffer = verticalGridlineSwapByteBuffer.asFloatBuffer();
+		verticalGridlineSwapBuffer.put(verticalGridlineSwap);
+		verticalGridlineSwapBuffer.position(0);
+
+		mPrevGridBounds = bounds;
+		// Log.v("Lines", "" + (lastLine - firstLine + 1));
 	}
 
 	public void drawGridlines(GL10 gl) {
@@ -413,6 +496,12 @@ public class DateChart extends GLSurfaceView implements Renderer {
 		gl.glPopMatrix();
 	}
 
+	public void calculatePeriod() {
+		// Duration duration = mPeriod.toStandardDuration();
+		mPeriodLines = mPendingGridPeriodType.getNumberInPeriod(mPeriod);
+		mPeriodSpacing = mPeriodSeconds / mPeriodLines;
+	}
+
 	public void onSurfaceChanged(GL10 gl, int width, int height) {
 		if (height == 0) { // Prevent A Divide By Zero By
 			height = 1; // Making Height Equal One
@@ -420,14 +509,23 @@ public class DateChart extends GLSurfaceView implements Renderer {
 
 		DateChart.mWindow = new Rect(0, 0, width, height);
 
-		//calculateGridlines();
-		int verticalRows = (int) (Math.ceil((maxValue + 20) / gridSize));
-		mMaxScaleFactor = (float) ((verticalRows - 1) * gridSize)
-				/ ((float) height - (height * 0.1f));
+		float maxScaleFactor = maxValue / ((float) height - (height * 0.1f));
 		if (mScaleFactor == 0) {
-			mScaleFactor = mMaxScaleFactor;
-			mScaleX = 1.0f;
+			mScaleFactor = maxScaleFactor;
+			mScaleX = (float) mPeriodSeconds / 10;
+
+			mScaleX = Math.min(mScaleX, 1.0f / ((mWindow.width() * .9f) / mPeriodSeconds / (1 / mScaleFactor)));
 		}
+
+		glText.setScale(mScaleFactor * mScaleX, mScaleFactor);
+
+		if (mPendingGridPeriodType == null) {
+			mGridPeriodType = GridPeriod.MONTHS;
+			mPendingGridPeriodType = GridPeriod.MONTHS;
+			calculateGridPeriod();
+		}
+		calculatePeriod();
+		calculateGridlines(true);
 
 		ratio = (float) width / (float) height;
 		gl.glEnable(GL10.GL_TEXTURE_2D);
@@ -436,13 +534,12 @@ public class DateChart extends GLSurfaceView implements Renderer {
 		gl.glLoadIdentity();
 
 		mPosX = Integer.MAX_VALUE;
-
 	}
 
 	public Bitmap getScreenShot()
 	{
 		screenShot = true;
-		while(lastScreenShot == null)
+		while (lastScreenShot == null)
 			try {
 				Thread.sleep(100);
 			} catch (InterruptedException e) {
@@ -451,7 +548,7 @@ public class DateChart extends GLSurfaceView implements Renderer {
 			}
 		return lastScreenShot;
 	}
-	
+
 	public void onSurfaceCreated(GL10 gl, EGLConfig config) {
 		glText = new GLText(gl, ctx.getAssets());
 		glText.load(fontName, fontSize, fontPadX, fontPadY);
@@ -462,55 +559,60 @@ public class DateChart extends GLSurfaceView implements Renderer {
 	public boolean onTouchEvent(MotionEvent ev) {
 		// Let the ScaleGestureDetector inspect all events.
 		mScaleDetector.onTouchEvent(ev);
-		//mFlingDetector.onTouchEvent(ev);
+		// mFlingDetector.onTouchEvent(ev);
 
 		final int action = ev.getAction();
-		float x; //, y;
+		float x; // , y;
 		int pointerIndex;
 
 		switch (action & MotionEvent.ACTION_MASK) {
 		case MotionEvent.ACTION_DOWN:
 			x = ev.getX();
-			//y = ev.getY();
+			// y = ev.getY();
 
 			mLastTouchX = x;
-			//mLastTouchY = y;
+			// mLastTouchY = y;
 			mActivePointerId = ev.getPointerId(0);
 
 			FPS = ACTIVE_FPS;
-			//Log.v("fps", "" + FPS);
+			// Log.v("fps", "" + FPS);
 			break;
 
 		case MotionEvent.ACTION_MOVE:
 			pointerIndex = ev.findPointerIndex(mActivePointerId);
 			x = ev.getX(pointerIndex);
-			//y = ev.getY(pointerIndex);
+			// y = ev.getY(pointerIndex);
 			FPS = ACTIVE_FPS;
 			// Only move if the ScaleGestureDetector isn't processing a gesture.
 			if (!mScaleDetector.isInProgress()) {
-				final float dx = (x - mLastTouchX) * 3f;
-				//final float dy = (y - mLastTouchY) * 3f;
+				final float dx = (x - mLastTouchX) * 1.3f;
+				// final float dy = (y - mLastTouchY) * 3f;
 				// dx = dx * 0.5f;
 
 				mPosX += dx * mScaleX * mScaleFactor;
+
 				// if(mPosX>(0-mScaleFactor * ((float) width *
 				// mScaleX)))mPosX=(0-mScaleFactor * ((float) width * mScaleX));
 				// mPosY += dy * mScaleFactor;
 
 				// Log.v("left", "" + mPosX);
 
+				if (!calculating) {
+					calculateGridlines(false);
+				}
+
 				invalidate();
 			}
 
 			mLastTouchX = x;
-			//mLastTouchY = y;
+			// mLastTouchY = y;
 
 			break;
 
 		case MotionEvent.ACTION_UP:
 		case MotionEvent.ACTION_CANCEL:
 			FPS = IDLE_FPS;
-			//Log.v("fps", "" + FPS);
+			Log.v("fps", "" + FPS);
 			mActivePointerId = INVALID_POINTER_ID;
 			break;
 
@@ -522,7 +624,7 @@ public class DateChart extends GLSurfaceView implements Renderer {
 				// active pointer and adjust accordingly.
 				final int newPointerIndex = pointerIndex == 0 ? 1 : 0;
 				mLastTouchX = ev.getX(newPointerIndex);
-				//mLastTouchY = ev.getY(newPointerIndex);
+				// mLastTouchY = ev.getY(newPointerIndex);
 				mActivePointerId = ev.getPointerId(newPointerIndex);
 			}
 			break;
@@ -532,20 +634,50 @@ public class DateChart extends GLSurfaceView implements Renderer {
 		return true;
 	}
 
+	private boolean calculateGridPeriod() {
+
+		GridPeriod type = mPendingGridPeriodType;
+		GridPeriod[] periods = GridPeriod.values();
+
+		final int length = periods.length;
+		final float textWidth = glText.getLength("        ");
+		// final Duration duration = mPeriod.toStandardDuration();
+
+		float lines;
+		float spacing;
+
+		for (int i = length - 1; i >= 0; i--) {
+			GridPeriod gridPeriod = periods[i];
+
+			lines = gridPeriod.getNumberInPeriod(mPeriod);
+			spacing = mPeriod.getStandardSeconds() / (float) lines;
+
+			if (textWidth > spacing) {
+				break;
+			}
+			mPendingGridPeriodType = gridPeriod;
+		}
+
+		calculatePeriod();
+
+		return type != mPendingGridPeriodType;
+	}
+
 	private class ScaleListener extends
 			ScaleGestureDetector.SimpleOnScaleGestureListener {
+
 		@Override
 		public boolean onScale(ScaleGestureDetector detector) {
-			mScaleFocalX = detector.getFocusX() - mScaleFocalX;
-			mScaleFocalY = detector.getFocusY() - mScaleFocalY;
 
 			if (!xScaleLock) {
-				mScaleFactor *= 1 / detector.getScaleFactor();
-				mScaleX += 1 - detector.getScaleFactor();
-				mScaleX = Math.min(3, Math.max(.4f, mScaleX));
+				// mScaleFactor *= 1 / detector.getScaleFactor();
+				mScaleX *= 1 / detector.getScaleFactor();
+				mScaleX = Math.min(mScaleX, 1.0f / ((mWindow.width() * .9f) / mPeriodSeconds / (1 / mScaleFactor)));
 				invalidate();
 			}
-			// Log.v("scale", "" + mScaleX);
+
+			boolean changed = calculateGridPeriod();
+			calculateGridlines(changed);
 
 			return true;
 		}
@@ -553,7 +685,7 @@ public class DateChart extends GLSurfaceView implements Renderer {
 		@Override
 		public boolean onScaleBegin(ScaleGestureDetector detector) {
 			FPS = ACTIVE_FPS;
-			//Log.v("fps", "" + FPS);
+			// Log.v("fps", "" + FPS);
 			return super.onScaleBegin(detector);
 		}
 
@@ -561,10 +693,184 @@ public class DateChart extends GLSurfaceView implements Renderer {
 		public void onScaleEnd(ScaleGestureDetector detector) {
 			super.onScaleEnd(detector);
 			FPS = IDLE_FPS;
-			//Log.v("fps", "" + FPS);
-			// mScaleFocalX = width / 2.0f;
-			// mScaleFocalY = height / 2.0f;
 		}
 	}
 
+	public void drawText(GL10 gl, GLText glText, float zoomLevel, float xZoomLevel, RectF bounds) {
+		gl.glPushMatrix();
+
+		gl.glDisable(GL10.GL_DEPTH_TEST);
+		gl.glMatrixMode(GL10.GL_MODELVIEW);
+		gl.glEnable(GL10.GL_TEXTURE_2D);
+		gl.glEnable(GL10.GL_BLEND);
+
+		glText.setScale(zoomLevel * xZoomLevel, zoomLevel);
+
+		glText.begin(1.0f, 1.0f, 1.0f, 1.0f);
+		// final int pointCount = this.size();
+
+		float x = 0;
+
+		// Duration duration = mPeriod.toStandardDuration();
+		float verticalLines = mGridPeriodType.getNumberInPeriod(mPeriod);
+		float verticalGridSpacingSize = mPeriod.getStandardSeconds() / (float) verticalLines;
+		String date;
+
+		RectF cullBound = new RectF(bounds);
+		cullBound.inset(-(cullBound.width() * 0.15f), 0);
+
+		int currentYear = -1;
+
+		final float lines = mGridPeriodType.getNumberInPeriod(mPeriod);
+		final float spacing = mPeriodSeconds / lines;
+
+		final int firstLine = (int) Math.max(0, bounds.left / spacing);
+		final int lastLine = (int) Math.min(Math.floor(lines), Math.ceil(bounds.right / spacing));
+
+		for (int i = firstLine; i <= lastLine; i++) {
+			x = i * verticalGridSpacingSize;
+
+			DateTime instant = mGridPeriodType.increment(mPeriodStartTime, i);
+
+			if (!cullBound.contains(x, -(DateChart.mWindow.height() * zoomLevel * 0.025f))) {
+				currentYear = instant.getYear();
+				continue;
+			}
+
+			DateMidnight midnight = new DateMidnight(instant);
+			Duration midDur = new Duration(midnight, instant);
+
+			if (midDur.toStandardSeconds().getSeconds() == 0) {
+				if (instant.getYear() != currentYear || mGridPeriodType.ordinal() > GridPeriod.YEARS.ordinal()) {
+					date = instant.toString(DateTimeFormat.forPattern("MMM/yyyy"));
+				} else {
+					date = instant.toString(DateTimeFormat.forPattern("MMM/dd"));
+				}
+			} else {
+				if (mGridPeriodType == GridPeriod.HALF_DAYS) {
+					date = "12:00";
+				} else if (mGridPeriodType == GridPeriod.HALF_HOURS && instant.getMinuteOfHour() > 15) {
+					date = instant.toString(DateTimeFormat.forPattern("k:mm"));
+				} else {
+					date = instant.toString(DateTimeFormat.forPattern("k':00'"));
+				}
+			}
+
+			if (i == 0) {
+				// TRLOLOLOLOL
+				glText.drawC("      " + date, x,
+						-(DateChart.mWindow.height() * zoomLevel * 0.025f));
+			} else if (i == verticalLines) {
+				glText.drawC(date + "      ", x,
+						-(DateChart.mWindow.height() * zoomLevel * 0.025f));
+			} else {
+				glText.drawC(date, x, -(DateChart.mWindow.height()
+						* zoomLevel * 0.025f));
+			}
+
+			currentYear = instant.getYear();
+		}
+		glText.end();
+		gl.glDisable(GL10.GL_BLEND);
+		gl.glDisable(GL10.GL_TEXTURE_2D);
+		gl.glEnable(GL10.GL_DEPTH_TEST);
+		gl.glPopMatrix();
+	}
+
+	private static enum GridPeriod {
+		HALF_HOURS,
+		HOURS,
+		// THREE_HOURS,
+		SIX_HOURS,
+		HALF_DAYS,
+		DAYS,
+		// THREE_DAYS,
+		WEEKS,
+		TWO_WEEKS,
+		MONTHS,
+		TWO_MONTHS,
+		SIX_MONTHS,
+		YEARS;
+
+		public DateTime increment(DateTime instant, int amount) {
+			switch (this) {
+			case DAYS:
+				return instant.plusDays(amount);
+			case HALF_DAYS:
+				return instant.withFieldAdded(DurationFieldType.halfdays(), amount);
+			case HOURS:
+				return instant.plusHours(amount);
+				// case THREE_HOURS:
+				// return instant.plusHours(3 * amount);
+			case SIX_HOURS:
+				return instant.plusHours(6 * amount);
+			case HALF_HOURS:
+				return instant.plusMinutes(30 * amount);
+			case MONTHS:
+				return instant.plusMonths(amount);
+				// case THREE_DAYS:
+				// return instant.plusDays(3 * amount);
+			case TWO_WEEKS:
+				return instant.plusWeeks(2 * amount);
+			case WEEKS:
+				return instant.plusWeeks(amount);
+			case SIX_MONTHS:
+				return instant.plusMonths(6 * amount);
+			case TWO_MONTHS:
+				return instant.plusMonths(2 * amount);
+			case YEARS:
+				return instant.plusYears(amount);
+
+			}
+			return instant;
+		}
+
+		public float getNumberInPeriod(Duration period) {
+			float count = 0;
+			switch (this) {
+			case DAYS:
+				count = period.toStandardDays().getDays();
+				break;
+			case HALF_DAYS:
+				count = period.toStandardDays().getDays() * 2;
+				break;
+			case HOURS:
+				count = period.toStandardHours().getHours();
+				break;
+			// case THREE_HOURS:
+			// count = period.toStandardHours().getHours() / 3.0f;
+			// break;
+			case SIX_HOURS:
+				count = period.toStandardHours().getHours() / 6.0f;
+				break;
+			case HALF_HOURS:
+				count = period.toStandardHours().getHours() * 2;
+				break;
+			case MONTHS:
+				count = period.toStandardDays().getDays() / 30.0f;
+				break;
+			// case THREE_DAYS:
+			// count = period.toStandardDays().getDays() / 3.0f;
+			// break;
+			case TWO_WEEKS:
+				count = period.toStandardDays().getDays() / 14.0f;
+				break;
+			case WEEKS:
+				count = period.toStandardDays().getDays() / 7.0f;
+				break;
+			case SIX_MONTHS:
+				count = period.toStandardDays().getDays() / 180.0f;
+				break;
+			case TWO_MONTHS:
+				count = period.toStandardDays().getDays() / 60.0f;
+				break;
+			case YEARS:
+				count = period.toStandardDays().getDays() / 365.0f;
+				break;
+
+			}
+
+			return count;
+		}
+	}
 }

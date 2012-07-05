@@ -9,15 +9,16 @@ import java.util.ArrayList;
 import javax.microedition.khronos.opengles.GL10;
 
 import zencharts.charts.DateChart;
-import zencharts.engine.GLText;
 import zencharts.engine.Symbol;
 import android.content.Context;
 import android.graphics.Bitmap;
 import android.graphics.Color;
-import android.graphics.Rect;
 import android.graphics.RectF;
-import android.util.Log;
 
+/**
+ * @author wes
+ * 
+ */
 public class DateSeries extends ArrayList<DatePoint> implements Serializable {
 
 	// Chart stuff
@@ -28,11 +29,8 @@ public class DateSeries extends ArrayList<DatePoint> implements Serializable {
 
 	public Symbol symbol;
 
-	//public Rect mWindow;
-
 	private Context ctx;
 	public int symbolResID = -1;
-	// private Symbol symbol;
 
 	private ByteBuffer symbolByteBuffer;
 	private FloatBuffer symbolBuffer;
@@ -51,6 +49,16 @@ public class DateSeries extends ArrayList<DatePoint> implements Serializable {
 	public boolean showMarkers = true;
 	public boolean dateLabels = true;
 
+	private long mMinDate = Long.MAX_VALUE;
+	private long mMaxDate;
+
+	private boolean mDrawSymbols = true;
+	private boolean mDrawShade = true;
+	private boolean mDrawLines = true;
+
+	private float mShadeAlpha = 0.6f;
+	private float mLineAlpha = 1f;
+
 	public DateSeries(Context context, int resourceID)
 	{
 		ctx = context;
@@ -61,6 +69,8 @@ public class DateSeries extends ArrayList<DatePoint> implements Serializable {
 	@Override
 	public boolean add(DatePoint object) {
 		super.add(object);
+		mMinDate = Math.min(mMinDate, object.timeStamp);
+		mMaxDate = Math.max(mMaxDate, object.timeStamp);
 		calcVerticies();
 
 		return true;
@@ -68,42 +78,51 @@ public class DateSeries extends ArrayList<DatePoint> implements Serializable {
 
 	@Override
 	public void add(int index, DatePoint object) {
-		calcVerticies();
 		super.add(index, object);
+		mMinDate = Math.min(mMinDate, object.timeStamp);
+		mMaxDate = Math.max(mMaxDate, object.timeStamp);
+
+		calcVerticies();
+
 	};
 
-	/*public void surfaceChanged(GL10 gl, Rect window)
-	{
-		mWindow = window;
-		//final float size = window.height() * 0.075f;
-		//symbol = new Symbol(0, 0, size, size);
-		//symbol.loadGLTexture(gl, ctx, symbolResID, lineColor);
-		// symbol.loadGLTexture(gl, ctx, symbolResID, lineColor);
-	}*/
+	/*
+	 * public void surfaceChanged(GL10 gl, Rect window) { mWindow = window;
+	 * //final float size = window.height() * 0.075f; //symbol = new Symbol(0,
+	 * 0, size, size); //symbol.loadGLTexture(gl, ctx, symbolResID, lineColor);
+	 * // symbol.loadGLTexture(gl, ctx, symbolResID, lineColor); }
+	 */
 
 	public void calcVerticies()
 	{
 		chartlines = new float[this.size() * 6];
 		vertices = new float[this.size() * 18];
-		int x = 0;
-		int y = 0;
 		int vPos = 0;
 		int cPos = 0;
-		int vLoop = this.size();
-		for (int v = 0; v < vLoop; v++)
+		float x = 0, nextX = 0;
+		final int pointCount = this.size();
+		DatePoint point, nextPoint;
+		for (int i = 0; i < pointCount; i++)
 		{
-			x = v * DateChart.gridSize;
-			y = get(v).value;
+			point = get(i);
+			nextPoint = (i + 1 < pointCount) ? get(i + 1) : point;
 
-			if (v + 1 < size()) {
-				// Draw "primary" triangle point
+			x = point.timeStamp - mMinDate;
+			nextX = nextPoint.timeStamp - mMinDate;
+
+			if (i + 1 < size()) {
+				// Vert 1
+				// X
 				vertices[vPos] = x;
 				vPos++;
-				vertices[vPos] = this.get(v).value;
+				// Y
+				vertices[vPos] = point.value;
 				vPos++;
+				// Z
 				vertices[vPos] = 0;
 				vPos++;
 
+				// Vert 2
 				vertices[vPos] = x;
 				vPos++;
 				vertices[vPos] = 0;
@@ -111,7 +130,8 @@ public class DateSeries extends ArrayList<DatePoint> implements Serializable {
 				vertices[vPos] = 0;// ;
 				vPos++;
 
-				vertices[vPos] = x + DateChart.gridSize;
+				// Vert 3
+				vertices[vPos] = nextX;
 				vPos++;
 				vertices[vPos] = 0;
 				vPos++;
@@ -120,21 +140,21 @@ public class DateSeries extends ArrayList<DatePoint> implements Serializable {
 
 				vertices[vPos] = x;
 				vPos++;
-				vertices[vPos] = this.get(v).value;
+				vertices[vPos] = point.value;
 				vPos++;
 				vertices[vPos] = 0;
 				vPos++;
 
-				vertices[vPos] = x + DateChart.gridSize;
+				vertices[vPos] = nextX;
 				vPos++;
 				vertices[vPos] = 0;
 				vPos++;
 				vertices[vPos] = 0;// this.get(v).value;
 				vPos++;
 
-				vertices[vPos] = x + DateChart.gridSize;
+				vertices[vPos] = nextX;
 				vPos++;
-				vertices[vPos] = this.get(v + 1).value;
+				vertices[vPos] = nextPoint.value;
 				vPos++;
 				vertices[vPos] = 0;// ;
 				vPos++;
@@ -142,14 +162,14 @@ public class DateSeries extends ArrayList<DatePoint> implements Serializable {
 				// Border
 				chartlines[cPos] = x;
 				cPos++;
-				chartlines[cPos] = y;
+				chartlines[cPos] = point.value;
 				cPos++;
 				chartlines[cPos] = 0;// ;
 				cPos++;
 
-				chartlines[cPos] = x + DateChart.gridSize;
+				chartlines[cPos] = nextX;
 				cPos++;
-				chartlines[cPos] = this.get(v + 1).value;
+				chartlines[cPos] = nextPoint.value;
 				cPos++;
 				chartlines[cPos] = 0;// ;
 				cPos++;
@@ -183,67 +203,69 @@ public class DateSeries extends ArrayList<DatePoint> implements Serializable {
 
 	}
 
-	public void draw(GL10 gl, GLText glText, float zoomLevel, float xZoomLevel, RectF bounds, boolean gridLines) {
-		try
-		{
+	public void draw(GL10 gl, float graphStartTime, float zoomLevel, float xZoomLevel, RectF bounds) {
+		try {
 
 			gl.glEnableClientState(GL10.GL_VERTEX_ARRAY);
-			//gl.glEnableClientState(GL10.GL_TEXTURE_COORD_ARRAY);
 
 			gl.glEnable(GL10.GL_BLEND);
 			gl.glBlendFunc(GL10.GL_SRC_ALPHA, GL10.GL_ONE_MINUS_SRC_ALPHA);
 
-			if (DateChart.drawSymbols)
-				drawSymbols(gl, bounds, zoomLevel, xZoomLevel);
+			if (mDrawSymbols) {
+				drawSymbols(gl, bounds, graphStartTime, zoomLevel, xZoomLevel);
+			}
 
 			// Draw chart
-			if (DateChart.drawShade)
-			{
+			if (mDrawShade) {
 				gl.glColor4f(Color.red(lineColor), Color.green(lineColor),
-						Color.blue(lineColor), DateChart.shadeAlpha);
+						Color.blue(lineColor), mShadeAlpha);
 				gl.glVertexPointer(3, GL10.GL_FLOAT, 0, vertexBuffer);
 				gl.glDrawArrays(GL10.GL_TRIANGLES, 0, vertices.length / 3);
 			}
 
 			// Borderlines
-			if (DateChart.drawLines)
-			{
-				//gl.glEnable(GL10.GL_LINE_SMOOTH);
+			if (mDrawLines) {
+				// gl.glEnable(GL10.GL_LINE_SMOOTH);
 				gl.glLineWidth(this.lineWidth);
 				gl.glVertexPointer(3, GL10.GL_FLOAT, 0, borderBuffer);
 				gl.glColor4f(Color.red(lineColor), Color.green(lineColor),
-						Color.blue(lineColor), DateChart.lineAlpha);
+						Color.blue(lineColor), mLineAlpha);
 				gl.glDrawArrays(GL10.GL_LINES, 0, chartlines.length / 3);
 				gl.glLineWidth(1f);
-				//gl.glDisable(GL10.GL_LINE_SMOOTH);
+				// gl.glDisable(GL10.GL_LINE_SMOOTH);
 			}
 
-			drawText(gl, glText, zoomLevel, xZoomLevel, bounds);
+			// drawText(gl, glText, zoomLevel, xZoomLevel, bounds);
 
 			// Disable the client state before leaving
 			gl.glDisableClientState(GL10.GL_VERTEX_ARRAY);
+		} catch (Exception ex) {
 		}
-		catch(Exception ex){}
 	}
 
-	public void drawSymbols(GL10 gl, RectF bounds, float zoomLevel, float xZoomLevel)
+	public void drawSymbols(GL10 gl, RectF bounds, float graphStartTime, float zoomLevel, float xZoomLevel)
 	{
-		int x = 0;
-		int y = 0;
+		if (symbolResID == 0) {
+			return;
+		}
 
-		if(symbol == null)
-		{
-			float size = DateChart.mWindow.height() * 0.075f;
+		long x = 0;
+		float y = 0;
+
+		if (symbol == null) {
+			float size = DateChart.mWindow.height() * 0.035f;
 			symbol = new Symbol(0, 0, size, size);
 			symbol.loadGLTexture(gl, ctx, symbolResID, lineColor);
 		}
 
-		final int vLoop = this.size();
-		for (int v = 0; v < vLoop; v++) {
-			x = v * DateChart.gridSize;
-			y = this.get(v).value;
+		final int pointCount = this.size();
+		DatePoint point;
+		for (int i = 0; i < pointCount; i++) {
+			point = get(i);
+			x = point.timeStamp - mMinDate;
+			y = point.value;
 
-			if (bounds.contains(x, y)) {
+			if (bounds.contains(point.timeStamp - graphStartTime, y)) {
 
 				gl.glPushMatrix();
 				gl.glTranslatef(x, y, 0);
@@ -257,50 +279,93 @@ public class DateSeries extends ArrayList<DatePoint> implements Serializable {
 		}
 	}
 
-	public void drawText(GL10 gl, GLText glText, float zoomLevel, float xZoomLevel, RectF bounds)
-	{
-		gl.glPushMatrix();
-
-		gl.glDisable(GL10.GL_DEPTH_TEST);
-		gl.glMatrixMode(GL10.GL_MODELVIEW);
-		gl.glEnable(GL10.GL_TEXTURE_2D);
-		gl.glEnable(GL10.GL_BLEND);
-
-		glText.setScale(zoomLevel * xZoomLevel, zoomLevel);
-
-		glText.begin(1.0f, 1.0f, 1.0f, 1.0f);
-		final int vLoop = this.size();
-
-		int x = 0;
-		int y = 0;
-
-		for (int v = 0; v < vLoop; v++)
-		{
-			x = v * DateChart.gridSize;
-			y = this.get(v).value;
-			// TODO:Removed bounds check for datelabels to prevent jumpy CD
-			if (dateLabels)// && bounds.contains(x, -2f))
-			{
-				if (v == 0) {
-					// TRLOLOLOLOL
-					glText.drawC("        " + this.get(v).dateString, x,
-							-(DateChart.mWindow.height() * zoomLevel * 0.025f));
-				} else if (v == vLoop - 1) {
-					glText.drawC(this.get(v).dateString + "        ", x,
-							-(DateChart.mWindow.height() * zoomLevel * 0.025f));
-				} else {
-					glText.drawC(this.get(v).dateString, x, -(DateChart.mWindow.height() * zoomLevel * 0.025f));
-				}
-			}
-
-			if (bounds.contains(x, y)) {
-				glText.drawC("" + this.get(v).label, x, y);
-			}
-		}
-		glText.end();
-		gl.glDisable(GL10.GL_BLEND);
-		gl.glDisable(GL10.GL_TEXTURE_2D);
-		gl.glEnable(GL10.GL_DEPTH_TEST);
-		gl.glPopMatrix();
+	/**
+	 * @return the drawSymbols
+	 */
+	public boolean isDrawSymbols() {
+		return mDrawSymbols;
 	}
+
+	/**
+	 * @param drawSymbols
+	 *            the drawSymbols to set
+	 */
+	public void setDrawSymbols(boolean drawSymbols) {
+		mDrawSymbols = drawSymbols;
+	}
+
+	/**
+	 * @return the drawShade
+	 */
+	public boolean isDrawShade() {
+		return mDrawShade;
+	}
+
+	/**
+	 * @param drawShade
+	 *            the drawShade to set
+	 */
+	public void setDrawShade(boolean drawShade) {
+		mDrawShade = drawShade;
+	}
+
+	/**
+	 * @return the drawLines
+	 */
+	public boolean isDrawLines() {
+		return mDrawLines;
+	}
+
+	/**
+	 * @param drawLines
+	 *            the drawLines to set
+	 */
+	public void setDrawLines(boolean drawLines) {
+		mDrawLines = drawLines;
+	}
+
+	/**
+	 * @return the shadeAlpha
+	 */
+	public float getShadeAlpha() {
+		return mShadeAlpha;
+	}
+
+	/**
+	 * @param shadeAlpha
+	 *            the shadeAlpha to set
+	 */
+	public void setShadeAlpha(float shadeAlpha) {
+		mShadeAlpha = shadeAlpha;
+	}
+
+	/**
+	 * @return the lineAlpha
+	 */
+	public float getLineAlpha() {
+		return mLineAlpha;
+	}
+
+	/**
+	 * @param lineAlpha
+	 *            the lineAlpha to set
+	 */
+	public void setLineAlpha(float lineAlpha) {
+		mLineAlpha = lineAlpha;
+	}
+
+	/**
+	 * @return the minDate
+	 */
+	public long getMinDate() {
+		return mMinDate;
+	}
+
+	/**
+	 * @return the maxDate
+	 */
+	public long getMaxDate() {
+		return mMaxDate;
+	}
+
 }
