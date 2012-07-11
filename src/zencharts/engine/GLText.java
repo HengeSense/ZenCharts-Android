@@ -384,6 +384,28 @@ public class GLText {
 											// Centered
 		return collision; // Return Length
 	}
+	
+	// --Draw Text Centered--// with collision detection
+		// D: draw text CENTERED at the specified x,y position
+		// A: text - the string to draw
+		// x, y - the x,y position to draw text at (bottom left of text)
+		// R: the total width of the text that was drawn
+		public boolean drawCC(String text, float x, float y) {
+			// boolean collision = false;
+			float len = getLength(text); // + 2; // Get Text Length
+			// boolean collision = false;
+			boolean collision =
+					checkCollision(
+					new RectF((x - (len / 2.0f)) - 2,
+							(y - (getCharHeight() / 2.0f)),
+							(x - (len / 2.0f) + len) + 2,
+							(y - (getCharHeight() / 2.0f) + getCharHeight())));
+			if (!collision)
+			draw(text, x - (len / 2.0f), y); // Draw
+												// Text
+												// Centered
+			return collision; // Return Length
+		}
 
 	public float drawCX(String text, float x, float y) {
 		float len = getLength(text); // Get Text Length
