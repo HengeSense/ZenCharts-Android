@@ -163,7 +163,8 @@ public class DateChart extends GLSurfaceView implements Renderer {
 				maxValue = Math.max(maxValue, series.get(j).value);
 			}
 		}
-		calculateGridlines(true);
+		//calculateGridlines(true);
+		refreshView();
 	}
 
 	/**
@@ -227,8 +228,12 @@ public class DateChart extends GLSurfaceView implements Renderer {
 		mStartTime = System.currentTimeMillis();
 
 		if ((seriesCollection != null) && (seriesCollection.size() > 0)) {
+			try
+			{
 			updateChart(gl);
 			renderChart(gl);
+			}
+			catch(Exception ex){}
 		}
 
 		if (screenShot) {
@@ -363,7 +368,11 @@ public class DateChart extends GLSurfaceView implements Renderer {
 
 		// gl.glTranslatef(-5000, 0, 0);
 
+		try
+		{
 		drawText(gl, glText, mScaleFactor, mScaleX, mScaledScreenBounds);
+		}
+		catch(Exception ex){}
 	}
 
 	private float[] verticalGridlines;
@@ -516,19 +525,13 @@ public class DateChart extends GLSurfaceView implements Renderer {
 		mPeriodSpacing = mPeriodSeconds / mPeriodLines;
 	}
 
-	public void onSurfaceChanged(GL10 gl, int width, int height) {
-
-		if (height == 0) { // Prevent A Divide By Zero By
-			height = 1; // Making Height Equal One
-		}
-
-		DateChart.mWindow = new Rect(0, 0, width, height);
-		
+	public void refreshView()
+	{
 		if (mPeriod == null) {
 			return;
 		}
 
-		float maxScaleFactor = maxValue / ((float) height - (height * 0.1f));
+		float maxScaleFactor = maxValue / ((float) mWindow.height() - (mWindow.height() * 0.1f));
 		if (mScaleFactor == 0) {
 			mScaleFactor = maxScaleFactor;
 			mScaleX = (float) mPeriodSeconds / 10;
@@ -548,7 +551,19 @@ public class DateChart extends GLSurfaceView implements Renderer {
 		calculatePeriod();
 		calculateGridlines(true);
 
-		ratio = (float) width / (float) height;
+		ratio = (float) mWindow.width() / (float) mWindow.height();
+	}
+	
+	public void onSurfaceChanged(GL10 gl, int width, int height) {
+
+		if (height == 0) { // Prevent A Divide By Zero By
+			height = 1; // Making Height Equal One
+		}
+
+		DateChart.mWindow = new Rect(0, 0, width, height);
+		
+		refreshView();
+		
 		gl.glEnable(GL10.GL_TEXTURE_2D);
 		gl.glViewport(0, 0, width, height);
 		gl.glMatrixMode(GL10.GL_MODELVIEW);
