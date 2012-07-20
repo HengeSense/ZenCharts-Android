@@ -27,7 +27,6 @@ import android.graphics.Rect;
 import android.graphics.RectF;
 import android.opengl.GLSurfaceView;
 import android.opengl.GLSurfaceView.Renderer;
-import android.os.AsyncTask;
 import android.util.AttributeSet;
 import android.util.Log;
 import android.view.MotionEvent;
@@ -52,6 +51,7 @@ public class DateChart extends GLSurfaceView implements Renderer {
 	private Duration mPeriod;
 	private GridPeriod mGridPeriodType;
 	private GridPeriod mPendingGridPeriodType;
+	private int mPeriodMaxSeconds;
 
 	private boolean gridLines = true;
 
@@ -129,6 +129,36 @@ public class DateChart extends GLSurfaceView implements Renderer {
 
 	}
 
+	public void showSymbols(boolean showsymbols)
+	{
+		if (seriesCollection != null) {
+			int iLoop = seriesCollection.size();
+			for (int i = 0; i < iLoop; i++) {
+				seriesCollection.get(i).setDrawSymbols(showsymbols);
+			}
+		}
+	}
+	
+	public void showShading(boolean showshades)
+	{
+		if (seriesCollection != null) {
+			int iLoop = seriesCollection.size();
+			for (int i = 0; i < iLoop; i++) {
+				seriesCollection.get(i).setDrawShade(showshades);
+			}
+		}
+	}
+	
+	public void showLines(boolean showlines)
+	{
+		if (seriesCollection != null) {
+			int iLoop = seriesCollection.size();
+			for (int i = 0; i < iLoop; i++) {
+				seriesCollection.get(i).setDrawLines(showlines);
+			}
+		}
+	}
+	
 	@Override
 	public void onPause() {
 		super.onPause();
@@ -163,7 +193,7 @@ public class DateChart extends GLSurfaceView implements Renderer {
 				maxValue = Math.max(maxValue, series.get(j).value);
 			}
 		}
-		//calculateGridlines(true);
+		// calculateGridlines(true);
 		refreshView();
 	}
 
@@ -180,6 +210,7 @@ public class DateChart extends GLSurfaceView implements Renderer {
 	 */
 	public void setPeriodStartTime(DateTime periodStartTime) {
 		mPeriodStartTime = periodStartTime;
+		refreshView();
 	}
 
 	public Duration getPeriod() {
@@ -189,6 +220,7 @@ public class DateChart extends GLSurfaceView implements Renderer {
 	public void setPeriod(Duration period) {
 		mPeriod = period;
 		mPeriodSeconds = period.toStandardSeconds().getSeconds();
+		refreshView();
 	}
 
 	public void clearChart() {
@@ -230,10 +262,10 @@ public class DateChart extends GLSurfaceView implements Renderer {
 		if ((seriesCollection != null) && (seriesCollection.size() > 0)) {
 			try
 			{
-			updateChart(gl);
-			renderChart(gl);
+				updateChart(gl);
+				renderChart(gl);
+			} catch (Exception ex) {
 			}
-			catch(Exception ex){}
 		}
 
 		if (screenShot) {
@@ -264,7 +296,7 @@ public class DateChart extends GLSurfaceView implements Renderer {
 			sb.rewind();
 			bitmap.copyPixelsFromBuffer(sb);
 			lastScreenShot = bitmap.copy(Config.RGB_565, true);
-
+			//bitmap.recycle();
 			screenShot = false;
 		}
 	}
@@ -281,7 +313,6 @@ public class DateChart extends GLSurfaceView implements Renderer {
 		if ((maxDataPoints <= 2) || currentWidth < (mWindow.width() * .9f)) {
 			xScaleLock = true;
 			mScaleX = currentWidth / (mWindow.width() * .9f);
-
 		}
 
 		final float left = (.5f * -mWindow.width());
@@ -291,8 +322,9 @@ public class DateChart extends GLSurfaceView implements Renderer {
 
 		// mPosX = Math.min(mPosX, -(scaledWidth * 0.9f));
 
-		final float minX = (-scaledWidth * 0.9f) / 2.0f;
-		final float maxX = -(mPeriodSeconds) + ((scaledWidth / 2.0f) * 0.9f);
+		final float minX = (-scaledWidth * 0.8f) / 2.0f;
+
+		final float maxX = -(Math.max(mPeriodMaxSeconds, mPeriodSeconds)) + ((scaledWidth / 2.0f) * 0.8f);
 		mPosX = Math.max(Math.min(minX, mPosX), maxX);
 
 		final float leftTrans = mPosX;// / 2.0f;
@@ -370,9 +402,9 @@ public class DateChart extends GLSurfaceView implements Renderer {
 
 		try
 		{
-		drawText(gl, glText, mScaleFactor, mScaleX, mScaledScreenBounds);
+			drawText(gl, glText, mScaleFactor, mScaleX, mScaledScreenBounds);
+		} catch (Exception ex) {
 		}
-		catch(Exception ex){}
 	}
 
 	private float[] verticalGridlines;
@@ -390,36 +422,33 @@ public class DateChart extends GLSurfaceView implements Renderer {
 	private RectF mPrevGridBounds = new RectF();
 	private boolean calculating = false;
 
-	public void calculateGridlines(boolean force) {
-		new AsyncTask<Boolean, Void, Void>() {
-			@Override
-			protected Void doInBackground(Boolean... params) {
+	public void calculateGridlines(final boolean force) {
+		queueEvent(new Runnable() {
+			public void run() {
 				calculating = true;
 				calculateHorizontalGridlines();
-				calculateVerticalGridlines(params[0]);
+				calculateVerticalGridlines(force);
 
-				return null;
+				DateTime dte = mGridPeriodType.increment(mPeriodStartTime, (int) Math.ceil(mPeriodLines));
+				Duration dur = new Duration(mPeriodStartTime, dte);
+				mPeriodMaxSeconds = dur.toStandardSeconds().getSeconds();
+
+				synchronized (this) {
+					verticalGridlines = verticalGridlineSwap;
+					horizontalGridlines = horizontalGridlineSwap;
+					verticalGridlineBuffer = verticalGridlineSwapBuffer;
+					horizontalGridlineBuffer = horizontalGridlineSwapBuffer;
+					mGridPeriodType = mPendingGridPeriodType;
+				}
+
+				calculating = false;
 			}
-
-			protected void onPostExecute(Void result) {
-				queueEvent(new Runnable() {
-					public synchronized void run() {
-						verticalGridlines = verticalGridlineSwap;
-						horizontalGridlines = horizontalGridlineSwap;
-						verticalGridlineBuffer = verticalGridlineSwapBuffer;
-						horizontalGridlineBuffer = horizontalGridlineSwapBuffer;
-						mGridPeriodType = mPendingGridPeriodType;
-						calculating = false;
-					}
-				});
-			};
-		}.execute(force);
+		});
 	}
 
 	private void calculateHorizontalGridlines() {
 
-		final float horizontalGridSpacingSize = HORIZONTAL_GRID_SECTIONS
-				/ maxValue;
+		final float horizontalGridSpacingSize = maxValue / (float) HORIZONTAL_GRID_SECTIONS;
 
 		horizontalGridlineSwap = new float[(HORIZONTAL_GRID_SECTIONS + 1) * 6];
 		int hPos = 0;
@@ -433,7 +462,7 @@ public class DateChart extends GLSurfaceView implements Renderer {
 			hPos++;
 
 			horizontalGridlineSwap[hPos] = (float) (mPeriodSpacing * (Math
-					.floor(mPeriodLines)));
+					.ceil(mPeriodLines)));
 			hPos++;
 			horizontalGridlineSwap[hPos] = i * horizontalGridSpacingSize;
 			hPos++;
@@ -461,12 +490,11 @@ public class DateChart extends GLSurfaceView implements Renderer {
 		RectF bounds = new RectF(mScaledScreenBounds);
 		bounds.inset(-mScaledScreenBounds.width() * 0.3f, 0);
 
-		final float horizontalGridSpacingSize = HORIZONTAL_GRID_SECTIONS
-				/ maxValue;
+		final float horizontalGridSpacingSize = maxValue / (float) HORIZONTAL_GRID_SECTIONS;
 
 		int vPos = 0;
 		int firstLine = (int) Math.max(0, bounds.left / mPeriodSpacing);
-		int lastLine = (int) Math.min(Math.floor(mPeriodLines),
+		int lastLine = (int) Math.min(Math.ceil(mPeriodLines),
 				Math.ceil(bounds.right / mPeriodSpacing));
 		verticalGridlineSwap = new float[(lastLine - firstLine + 1) * 6];
 		for (int i = firstLine; i <= lastLine; i++) {
@@ -532,28 +560,24 @@ public class DateChart extends GLSurfaceView implements Renderer {
 		}
 
 		float maxScaleFactor = maxValue / ((float) mWindow.height() - (mWindow.height() * 0.1f));
-		if (mScaleFactor == 0) {
-			mScaleFactor = maxScaleFactor;
-			mScaleX = (float) mPeriodSeconds / 10;
+		mScaleFactor = maxScaleFactor;
+		mScaleX = (float) mPeriodSeconds / 10;
 
-			mScaleX = Math.min(mScaleX, 1.0f / ((mWindow.width() * .9f)
-					/ mPeriodSeconds / (1 / mScaleFactor)));
-		}
+		mScaleX = Math.min(mScaleX, 1.0f / ((mWindow.width() * .9f)
+				/ mPeriodSeconds / (1 / mScaleFactor)));
 
 		glText.setScale(mScaleFactor * mScaleX, mScaleFactor);
 
-		if (mPendingGridPeriodType == null) {
-			mGridPeriodType = GridPeriod.MONTHS;
-			mPendingGridPeriodType = GridPeriod.MONTHS;
-			calculateGridPeriod();
-		}
-		
+		mGridPeriodType = GridPeriod.MONTHS;
+		mPendingGridPeriodType = GridPeriod.MONTHS;
+		calculateGridPeriod();
+
 		calculatePeriod();
 		calculateGridlines(true);
 
 		ratio = (float) mWindow.width() / (float) mWindow.height();
 	}
-	
+
 	public void onSurfaceChanged(GL10 gl, int width, int height) {
 
 		if (height == 0) { // Prevent A Divide By Zero By
@@ -561,9 +585,9 @@ public class DateChart extends GLSurfaceView implements Renderer {
 		}
 
 		DateChart.mWindow = new Rect(0, 0, width, height);
-		
+
 		refreshView();
-		
+
 		gl.glEnable(GL10.GL_TEXTURE_2D);
 		gl.glViewport(0, 0, width, height);
 		gl.glMatrixMode(GL10.GL_MODELVIEW);
@@ -647,7 +671,7 @@ public class DateChart extends GLSurfaceView implements Renderer {
 		case MotionEvent.ACTION_UP:
 		case MotionEvent.ACTION_CANCEL:
 			FPS = IDLE_FPS;
-			Log.v("fps", "" + FPS);
+			//Log.v("fps", "" + FPS);
 			mActivePointerId = INVALID_POINTER_ID;
 			break;
 
@@ -670,12 +694,15 @@ public class DateChart extends GLSurfaceView implements Renderer {
 	}
 
 	private boolean calculateGridPeriod() {
+		if (mPeriod == null) {
+			return false;
+		}
 
 		GridPeriod type = mPendingGridPeriodType;
 		GridPeriod[] periods = GridPeriod.values();
 
 		final int length = periods.length;
-		final float textWidth = glText.getLength("        ");
+		final float textWidth = glText.getLength("         ");
 		// final Duration duration = mPeriod.toStandardDuration();
 
 		float lines;
@@ -763,7 +790,7 @@ public class DateChart extends GLSurfaceView implements Renderer {
 		final float spacing = mPeriodSeconds / lines;
 
 		final int firstLine = (int) Math.max(0, bounds.left / spacing);
-		final int lastLine = (int) Math.min(Math.floor(lines),
+		final int lastLine = (int) Math.min(Math.ceil(lines),
 				Math.ceil(bounds.right / spacing));
 
 		for (int i = firstLine; i <= lastLine; i++) {

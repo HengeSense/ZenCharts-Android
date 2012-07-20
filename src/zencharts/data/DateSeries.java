@@ -56,7 +56,7 @@ public class DateSeries extends ArrayList<DatePoint> implements Serializable {
 	private boolean mDrawShade = true;
 	private boolean mDrawLines = true;
 
-	private float mShadeAlpha = 0.6f;
+	private float mShadeAlpha = 0.2f;
 	private float mLineAlpha = 1f;
 
 	public DateSeries(Context context, int resourceID)
@@ -69,8 +69,8 @@ public class DateSeries extends ArrayList<DatePoint> implements Serializable {
 	@Override
 	public boolean add(DatePoint object) {
 		super.add(object);
-		mMinDate = Math.min(mMinDate, object.timeStamp);
-		mMaxDate = Math.max(mMaxDate, object.timeStamp);
+		mMinDate = Math.min(mMinDate, (object.timeStamp / 1000));
+		mMaxDate = Math.max(mMaxDate, (object.timeStamp / 1000));
 		calcVerticies();
 
 		return true;
@@ -79,8 +79,8 @@ public class DateSeries extends ArrayList<DatePoint> implements Serializable {
 	@Override
 	public void add(int index, DatePoint object) {
 		super.add(index, object);
-		mMinDate = Math.min(mMinDate, object.timeStamp);
-		mMaxDate = Math.max(mMaxDate, object.timeStamp);
+		mMinDate = Math.min(mMinDate, (object.timeStamp / 1000));
+		mMaxDate = Math.max(mMaxDate, (object.timeStamp / 1000));
 
 		calcVerticies();
 
@@ -107,8 +107,8 @@ public class DateSeries extends ArrayList<DatePoint> implements Serializable {
 			point = get(i);
 			nextPoint = (i + 1 < pointCount) ? get(i + 1) : point;
 
-			x = point.timeStamp - mMinDate;
-			nextX = nextPoint.timeStamp - mMinDate;
+			x = (point.timeStamp / 1000) - mMinDate;
+			nextX = (nextPoint.timeStamp /1000) - mMinDate;
 
 			if (i + 1 < size()) {
 				// Vert 1
@@ -262,10 +262,10 @@ public class DateSeries extends ArrayList<DatePoint> implements Serializable {
 		DatePoint point;
 		for (int i = 0; i < pointCount; i++) {
 			point = get(i);
-			x = point.timeStamp - mMinDate;
+			x = (point.timeStamp / 1000) - mMinDate;
 			y = point.value;
 
-			if (bounds.contains(point.timeStamp - graphStartTime, y)) {
+			if (bounds.contains((point.timeStamp / 1000) - graphStartTime, y)) {
 
 				gl.glPushMatrix();
 				gl.glTranslatef(x, y, 0);
