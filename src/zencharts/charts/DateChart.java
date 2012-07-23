@@ -29,9 +29,11 @@ import android.opengl.GLSurfaceView;
 import android.opengl.GLSurfaceView.Renderer;
 import android.util.AttributeSet;
 import android.util.Log;
+import android.view.GestureDetector;
 import android.view.MotionEvent;
 import android.view.ScaleGestureDetector;
 import android.view.SurfaceHolder;
+import android.view.animation.AccelerateDecelerateInterpolator;
 
 public class DateChart extends GLSurfaceView implements Renderer {
 	private String fontName;
@@ -76,6 +78,7 @@ public class DateChart extends GLSurfaceView implements Renderer {
 	private ArrayList<DateSeries> seriesCollection;
 
 	private ScaleGestureDetector mScaleDetector;
+	private GestureDetector mGestureDetector;
 
 	private float mScaleFactor;
 	private float mScaleX = 0;
@@ -126,7 +129,7 @@ public class DateChart extends GLSurfaceView implements Renderer {
 
 		// Create our ScaleGestureDetector
 		mScaleDetector = new ScaleGestureDetector(context, new ScaleListener());
-
+		mGestureDetector = new GestureDetector(new SimpleGestureDetector());
 	}
 
 	public void showSymbols(boolean showsymbols)
@@ -138,7 +141,7 @@ public class DateChart extends GLSurfaceView implements Renderer {
 			}
 		}
 	}
-	
+
 	public void showShading(boolean showshades)
 	{
 		if (seriesCollection != null) {
@@ -148,7 +151,7 @@ public class DateChart extends GLSurfaceView implements Renderer {
 			}
 		}
 	}
-	
+
 	public void showLines(boolean showlines)
 	{
 		if (seriesCollection != null) {
@@ -158,7 +161,7 @@ public class DateChart extends GLSurfaceView implements Renderer {
 			}
 		}
 	}
-	
+
 	@Override
 	public void onPause() {
 		super.onPause();
@@ -296,7 +299,7 @@ public class DateChart extends GLSurfaceView implements Renderer {
 			sb.rewind();
 			bitmap.copyPixelsFromBuffer(sb);
 			lastScreenShot = bitmap.copy(Config.RGB_565, true);
-			//bitmap.recycle();
+			// bitmap.recycle();
 			screenShot = false;
 		}
 	}
@@ -322,8 +325,41 @@ public class DateChart extends GLSurfaceView implements Renderer {
 
 		// mPosX = Math.min(mPosX, -(scaledWidth * 0.9f));
 
-		final float minX = (-scaledWidth * 0.8f) / 2.0f;
+		if (mAnimating) {
+			FPS = ACTIVE_FPS;
+			if (mAnimationStart == 0) {
+				mAnimationStart = System.currentTimeMillis();
+			}
 
+			final long time = System.currentTimeMillis();
+			final long timeDelta = time - mAnimationStart;
+			float interp = mInterpolator.getInterpolation(Math.min(1.0f, Math.max(0, timeDelta / 250.0f)));
+
+			float zoomChange = 1.0f;
+			if (mZoomAnimating) {
+				zoomChange = (interp * (mMaxPendingZoom - 1)) + 1;
+				Log.d("blar", "zooomchange " + zoomChange + " mscalex" + mScaleX + " startscalex " + mAnimationStartScaleX
+						+ " maxzoomchange " + mMaxPendingZoom);
+				mScaleX = mAnimationStartScaleX / zoomChange;
+				if (calculateGridPeriod()) {
+					mZoomAnimating = false;
+					calculateGridlines(true);
+				}
+			}
+
+			mPosX = mAnimationStartX - (interp * mPendingChange);
+			// Log.d("blar", "timedelt " + timeDelta + " interp " + interp +
+			// " starx " + mAnimationStartX + " pending " + mPendingChange);
+			if (interp > 0.99) {
+				mAnimating = false;
+				mAnimationStart = 0;
+				calculateGridlines(false);
+				FPS = IDLE_FPS;
+				Log.d("blar", "upper idle fps");
+			}
+		}
+
+		final float minX = (-scaledWidth * 0.8f) / 2.0f;
 		final float maxX = -(Math.max(mPeriodMaxSeconds, mPeriodSeconds)) + ((scaledWidth / 2.0f) * 0.8f);
 		mPosX = Math.max(Math.min(minX, mPosX), maxX);
 
@@ -555,7 +591,7 @@ public class DateChart extends GLSurfaceView implements Renderer {
 
 	public void refreshView()
 	{
-		if (mPeriod == null) {
+		if (mPeriod == null || mWindow == null || glText == null) {
 			return;
 		}
 
@@ -614,10 +650,61 @@ public class DateChart extends GLSurfaceView implements Renderer {
 		mStartTime = System.currentTimeMillis();
 	}
 
+	private class SimpleGestureDetector extends GestureDetector.SimpleOnGestureListener {
+		@Override
+		public boolean onDoubleTap(MotionEvent e) {
+			mAnimating = true;
+			float deltaPercent = e.getX() / mWindow.width();
+			deltaPercent = deltaPercent - 0.5f;
+			mAnimationStart = 0;
+			mPendingChange = deltaPercent * mScaledScreenBounds.width();
+			mAnimationStartX = mPosX;
+			mAnimationStartScaleX = mScaleX;
+
+			final GridPeriod nextPeriod = mGridPeriodType.getNextZoomInPeriod();
+			if (nextPeriod == null) {
+				mMaxPendingZoom = 0;
+				return true;
+			}
+
+			mZoomAnimating = true;
+
+			mMaxPendingZoom = nextPeriod.getNumberInPeriod(mPeriod)
+					/ mGridPeriodType.getNumberInPeriod(mPeriod);
+			Log.d("blar", "pending " + mMaxPendingZoom + " current " + mScaleX);
+
+			return true;
+		}
+	}
+
+	private float mPendingChange;
+	private float mMaxPendingZoom;
+	private float mAnimationStartScaleX;
+	private float mAnimationStartX;
+	private long mAnimationStart;
+	private boolean mZoomAnimating;
+	private boolean mAnimating;
+	private AccelerateDecelerateInterpolator mInterpolator = new AccelerateDecelerateInterpolator();
+
+	private void pan(float windowX) {
+	}
+
 	@Override
 	public boolean onTouchEvent(MotionEvent ev) {
 		// Let the ScaleGestureDetector inspect all events.
 		mScaleDetector.onTouchEvent(ev);
+		boolean eventHandled = mGestureDetector.onTouchEvent(ev);
+		if (eventHandled) {
+			return true;
+		}
+
+		if (mAnimating) {
+			final long timeDelta = System.currentTimeMillis() - mAnimationStart;
+			if (timeDelta < 100) {
+				return true;
+			}
+		}
+
 		// mFlingDetector.onTouchEvent(ev);
 
 		final int action = ev.getAction();
@@ -639,6 +726,9 @@ public class DateChart extends GLSurfaceView implements Renderer {
 
 		case MotionEvent.ACTION_MOVE:
 			pointerIndex = ev.findPointerIndex(mActivePointerId);
+			if (pointerIndex == -1) {
+				return false;
+			}
 			x = ev.getX(pointerIndex);
 			// y = ev.getY(pointerIndex);
 			FPS = ACTIVE_FPS;
@@ -647,7 +737,8 @@ public class DateChart extends GLSurfaceView implements Renderer {
 				final float dx = (x - mLastTouchX) * 1.3f;
 				// final float dy = (y - mLastTouchY) * 3f;
 				// dx = dx * 0.5f;
-
+				mAnimating = false;
+				mAnimationStart = 0;
 				mPosX += dx * mScaleX * mScaleFactor;
 
 				// if(mPosX>(0-mScaleFactor * ((float) width *
@@ -670,8 +761,9 @@ public class DateChart extends GLSurfaceView implements Renderer {
 
 		case MotionEvent.ACTION_UP:
 		case MotionEvent.ACTION_CANCEL:
+			Log.d("blar", "cancel idle fps");
 			FPS = IDLE_FPS;
-			//Log.v("fps", "" + FPS);
+			// Log.v("fps", "" + FPS);
 			mActivePointerId = INVALID_POINTER_ID;
 			break;
 
@@ -856,6 +948,20 @@ public class DateChart extends GLSurfaceView implements Renderer {
 		SIX_HOURS, HALF_DAYS, DAYS,
 		// THREE_DAYS,
 		WEEKS, TWO_WEEKS, MONTHS, TWO_MONTHS, SIX_MONTHS, YEARS;
+
+		public GridPeriod getNextZoomInPeriod() {
+			GridPeriod next = null;
+
+			for (GridPeriod period : values()) {
+				if (period == this) {
+					return next;
+				}
+
+				next = period;
+			}
+
+			return next;
+		}
 
 		public DateTime increment(DateTime instant, int amount) {
 			switch (this) {
