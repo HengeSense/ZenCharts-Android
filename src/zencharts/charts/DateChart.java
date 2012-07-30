@@ -68,6 +68,7 @@ public class DateChart extends GLSurfaceView implements Renderer {
 	private Bitmap lastScreenShot;
 	private boolean screenShot = false;
 
+	public float maxValueManual = 0;
 	public float maxValue;
 	public int maxDataPoints;
 
@@ -196,6 +197,10 @@ public class DateChart extends GLSurfaceView implements Renderer {
 				maxValue = Math.max(maxValue, series.get(j).value);
 			}
 		}
+		
+		if(maxValueManual > 0)
+			maxValue = maxValueManual;
+		
 		// calculateGridlines(true);
 		refreshView();
 	}
