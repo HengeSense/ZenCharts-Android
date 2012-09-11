@@ -217,8 +217,8 @@ public class DateSeries extends ArrayList<DatePoint> implements Serializable {
 
 			// Draw chart
 			if (mDrawShade) {
-				gl.glColor4f(Color.red(lineColor), Color.green(lineColor),
-						Color.blue(lineColor), mShadeAlpha);
+				gl.glColor4f(Color.red(lineColor)/255f, Color.green(lineColor)/255f,
+						Color.blue(lineColor)/255f, mShadeAlpha);
 				gl.glVertexPointer(3, GL10.GL_FLOAT, 0, vertexBuffer);
 				gl.glDrawArrays(GL10.GL_TRIANGLES, 0, vertices.length / 3);
 			}
@@ -228,8 +228,8 @@ public class DateSeries extends ArrayList<DatePoint> implements Serializable {
 				// gl.glEnable(GL10.GL_LINE_SMOOTH);
 				gl.glLineWidth(this.lineWidth);
 				gl.glVertexPointer(3, GL10.GL_FLOAT, 0, borderBuffer);
-				gl.glColor4f(Color.red(lineColor), Color.green(lineColor),
-						Color.blue(lineColor), mLineAlpha);
+				gl.glColor4f(Color.red(lineColor)/255f, Color.green(lineColor)/255f,
+						Color.blue(lineColor)/255f, mLineAlpha);
 				gl.glDrawArrays(GL10.GL_LINES, 0, chartlines.length / 3);
 				gl.glLineWidth(1f);
 				// gl.glDisable(GL10.GL_LINE_SMOOTH);

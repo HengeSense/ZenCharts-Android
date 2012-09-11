@@ -472,8 +472,16 @@ public class DateChart extends GLSurfaceView implements Renderer {
 
 				DateTime dte = mGridPeriodType.increment(mPeriodStartTime, (int) Math.ceil(mPeriodLines));
 				Duration dur = new Duration(mPeriodStartTime, dte);
-				mPeriodMaxSeconds = dur.toStandardSeconds().getSeconds();
-
+				
+				try
+				{
+					mPeriodMaxSeconds = dur.toStandardSeconds().getSeconds();
+				}
+				catch(Exception ex)
+				{
+					mPeriodMaxSeconds = 0;
+				}
+				
 				synchronized (this) {
 					verticalGridlines = verticalGridlineSwap;
 					horizontalGridlines = horizontalGridlineSwap;
