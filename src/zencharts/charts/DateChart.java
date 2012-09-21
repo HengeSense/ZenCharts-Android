@@ -684,7 +684,7 @@ public class DateChart extends GLSurfaceView implements Renderer {
 
 			mMaxPendingZoom = nextPeriod.getNumberInPeriod(mPeriod)
 					/ mGridPeriodType.getNumberInPeriod(mPeriod);
-			Log.d("blar", "pending " + mMaxPendingZoom + " current " + mScaleX);
+			//Log.d("blar", "pending " + mMaxPendingZoom + " current " + mScaleX);
 
 			return true;
 		}
@@ -774,7 +774,7 @@ public class DateChart extends GLSurfaceView implements Renderer {
 
 		case MotionEvent.ACTION_UP:
 		case MotionEvent.ACTION_CANCEL:
-			Log.d("blar", "cancel idle fps");
+			//Log.d("blar", "cancel idle fps");
 			FPS = IDLE_FPS;
 			// Log.v("fps", "" + FPS);
 			mActivePointerId = INVALID_POINTER_ID;
