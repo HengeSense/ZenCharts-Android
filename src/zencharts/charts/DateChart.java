@@ -318,7 +318,7 @@ public class DateChart extends GLSurfaceView implements Renderer {
 		final float scaledHeight = mScaleFactor * (float) mWindow.height();
 
 		final float currentWidth = (mPeriodSeconds / mScaleFactor);
-		if ((maxDataPoints <= 2) || currentWidth < (mWindow.width() * .9f)) {
+		if (currentWidth < (mWindow.width() * .9f)) {
 			xScaleLock = true;
 			mScaleX = currentWidth / (mWindow.width() * .9f);
 		}
